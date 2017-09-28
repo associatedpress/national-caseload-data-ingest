@@ -129,10 +129,8 @@ def get_field_type(field_type_text):
 def ensure_table_exists(table_name, table_schema, connection):
     logger = logging.getLogger(__name__).getChild('ensure_table_exists')
 
-    # FIXME: Why isn't this detecting the existing table? So far it isn't
-    # causing any problems to attempt to recreate it, but it's still
-    # concerning.
     metadata = MetaData(connection)
+    metadata.reflect()
     if table_name in metadata.tables:
         logger.debug('Table {0} already exists'.format(table_name))
         return metadata.tables[table_name]
