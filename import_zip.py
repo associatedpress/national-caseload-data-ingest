@@ -101,8 +101,11 @@ def get_field_type(field_type_text):
         return sqlalchemy.types.String(length)
 
     if field_type_component == 'NUMBER':
-        number_args = tuple(map(
-            int, re.split(r',\s*', field_components.group('args'))))
+        try:
+            number_args = tuple(map(
+                int, re.split(r',\s*', field_components.group('args'))))
+        except TypeError:
+            return sqlalchemy.types.BigInteger
 
         if len(number_args) == 1:
             length = number_args[0]
