@@ -1,0 +1,5 @@
+csvkit==1.0.2
+SQLAlchemy==1.1.14
+agate==1.6.0
+agate-sql==0.5.2
+psycopg2==2.7.3.1
