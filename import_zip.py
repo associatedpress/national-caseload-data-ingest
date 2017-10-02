@@ -122,6 +122,30 @@ def get_field_type(field_type_text):
     if field_type_component == 'DATE':
         return sqlalchemy.types.Date
 
+    if field_type_component == 'FLOAT':
+        return sqlalchemy.types.Float
+
+    raise NotImplementedError(
+        'Unsure how to handle a {0}'.format(field_type_text))
+
+
+def get_agate_type(field_type_text):
+    field_components = re.match(
+        r'(?P<type>[^(]+)(?:\((?P<args>.+)\))?', field_type_text)
+    field_type_component = field_components.group('type')
+
+    if field_type_component in ('VARCHAR', 'VARCHAR2'):
+        return agate.Text()
+
+    if field_type_component == 'NUMBER':
+        return agate.Number()
+
+    if field_type_component == 'DATE':
+        return agate.Date(date_format='%d-%b-%Y')
+
+    if field_type_component == 'FLOAT':
+        return agate.Number()
+
     raise NotImplementedError(
         'Unsure how to handle a {0}'.format(field_type_text))
 
@@ -148,6 +172,21 @@ def ensure_table_exists(table_name, table_schema, connection):
     logger.info('Created table {0}'.format(table_name))
 
     return table
+
+
+def build_agate_types(table_schema):
+    logger = logging.getLogger(__name__).getChild('build_agate_types')
+
+    table_schema.seek(0)
+    schema_reader = csv.DictReader(table_schema)
+
+    def build_column(row):
+        return (row['column'], get_agate_type(row['field_type']))
+    columns = dict(map(build_column, schema_reader))
+
+    logger.info('Converted column types for agate')
+
+    return columns
 
 
 def load_table(name=None, schema=None, input_zip=None, connection=None):
@@ -187,7 +226,9 @@ def load_table(name=None, schema=None, input_zip=None, connection=None):
         data_csv_file.close()
 
         without_asterisks_file.seek(0)
-        csv_table = agate.Table.from_csv(without_asterisks_file, sniff_limit=0)
+        agate_types = build_agate_types(schema)
+        csv_table = agate.Table.from_csv(
+            without_asterisks_file, sniff_limit=0, column_types=agate_types)
         logger.debug('Loaded CSV into agate table')
         csv_table.to_sql(
             connection, name, overwrite=False, create=False,
