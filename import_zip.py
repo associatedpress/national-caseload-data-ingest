@@ -238,6 +238,22 @@ def load_table(name=None, schema=None, input_zip=None, connection=None):
         without_asterisks_file.close()
 
 
+def import_tables_with_schemas(table_schemas, input_zip, connection):
+    logger = logging.getLogger(__name__).getChild('import_tables_with_schemas')
+
+    logger.info('Found {0} table schemas: {1}'.format(
+        len(table_schemas.keys()),
+        ', '.join(sorted(table_schemas.keys()))))
+
+    table_names = sorted(table_schemas.keys())
+    for table_name in table_names:
+        table_schema = table_schemas[table_name]
+        load_table(
+            name=table_name, schema=table_schema, input_zip=input_zip,
+            connection=connection)
+        logger.info('Loaded table {0}'.format(table_name))
+
+
 def main(input_path, database_url):
     logger = logging.getLogger(__name__).getChild('main')
 
@@ -249,17 +265,8 @@ def main(input_path, database_url):
         logger.info('Opened input file {0}'.format(input_path))
 
         table_schemas = extract_table_schemas(input_zip)
-        logger.info('Found {0} table schemas: {1}'.format(
-            len(table_schemas.keys()),
-            ', '.join(sorted(table_schemas.keys()))))
-
-        table_names = sorted(table_schemas.keys())
-        for table_name in table_names:
-            table_schema = table_schemas[table_name]
-            load_table(
-                name=table_name, schema=table_schema, input_zip=input_zip,
-                connection=connection)
-            logger.info('Loaded table {0}'.format(table_name))
+        if table_schemas:
+            import_tables_with_schemas(table_schemas, input_zip, connection)
 
     connection.close()
     logger.info('Done')
