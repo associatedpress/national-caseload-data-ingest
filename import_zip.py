@@ -254,6 +254,14 @@ def import_tables_with_schemas(table_schemas, input_zip, connection):
         logger.info('Loaded table {0}'.format(table_name))
 
 
+def load_global_file(input_zip, connection):
+    pass
+
+
+def load_lookup_tables(input_zip, connection):
+    pass
+
+
 def main(input_path, database_url):
     logger = logging.getLogger(__name__).getChild('main')
 
@@ -265,8 +273,10 @@ def main(input_path, database_url):
         logger.info('Opened input file {0}'.format(input_path))
 
         table_schemas = extract_table_schemas(input_zip)
-        if table_schemas:
-            import_tables_with_schemas(table_schemas, input_zip, connection)
+        import_tables_with_schemas(table_schemas, input_zip, connection)
+
+        load_global_file(input_zip, connection)
+        load_lookup_tables(input_zip, connection)
 
     connection.close()
     logger.info('Done')
