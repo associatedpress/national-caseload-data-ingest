@@ -9,7 +9,7 @@ import tempfile
 import zipfile
 
 import agate
-import agatesql
+import agatesql  # noqa: F401
 from csvkit.convert.fixed import fixed2csv
 from sqlalchemy import Column, create_engine, MetaData, Table
 import sqlalchemy.types
@@ -201,7 +201,7 @@ def load_table(name=None, schema=None, input_zip=None, connection=None):
         len(data_file_names), name, ', '.join(data_file_names)))
 
     for data_file_name in data_file_names:
-        db_table = ensure_table_exists(name, schema, connection)
+        ensure_table_exists(name, schema, connection)
         logger.debug('Ensured table {0} exists'.format(name))
 
         schema.seek(0)
