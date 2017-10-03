@@ -341,7 +341,7 @@ def import_global_table(table_name, table_io, connection):
     logger.debug('Loaded CSV into agate table')
 
     csv_table.to_sql(
-        connection, table_name, overwrite=False, create=True,
+        connection, table_name, overwrite=True, create=True,
         create_if_not_exists=True, insert=True)
     logger.info('Done loading data into table {0}'.format(table_name))
 
