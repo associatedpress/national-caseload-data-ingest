@@ -373,7 +373,30 @@ def load_global_file(input_zip, connection):
 
 
 def load_lookup_tables(input_zip, connection):
-    pass
+    logger = logging.getLogger(__name__).getChild('load_lookup_tables')
+
+    lookup_table_file_names = sorted(tuple(filter(
+        lambda name: name.startswith('table_gs_'), input_zip.namelist())))
+    logger.info('Found {0} files with lookup tables: {1}'.format(
+        len(lookup_table_file_names), ', '.join(lookup_table_file_names)))
+
+    for file_name in lookup_table_file_names:
+        with input_zip.open(file_name, 'r') as input_file:
+            raw_text = input_file.read().decode('utf-8')
+
+        table_name = re.search(r'(?<=\s)GS_[^\s]+', raw_text).group(0)
+        blank_line_matches = tuple(
+            re.finditer(r'^[\s\n]*$', raw_text, re.MULTILINE))
+        table_start = blank_line_matches[0].end()
+        table_end = blank_line_matches[1].start()
+
+        raw_table = raw_text[table_start:table_end].strip()
+        logger.debug('Isolated lookup table {0}'.format(table_name))
+
+        table_io = extract_global_table(raw_table)
+        logger.debug('Extracted lookup table {0}'.format(table_name))
+
+        import_global_table(table_name, table_io, connection)
 
 
 # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
