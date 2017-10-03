@@ -25,6 +25,11 @@ ch.setFormatter(formatter)
 logger.addHandler(ch)
 
 
+# -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+# -=-=-=-=-=-=-=-=-=-= HANDLING NORMAL TABLE DATA FILES -=-=-=-=-=-=-=-=-=-=-=-
+# -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+
+
 def make_schema_io(raw_field_specs):
     def make_row(row):
         start_column = int(row.group('start_column'))
@@ -66,6 +71,8 @@ def extract_table_schemas(input_zip):
     schemas = {}
 
     table_names = re.findall(r'^([A-Z][^ ]+) - ', readme, re.MULTILINE)
+    if not table_names:
+        return schemas
 
     def get_table_start(table_name):
         start_match = re.search(
@@ -254,12 +261,124 @@ def import_tables_with_schemas(table_schemas, input_zip, connection):
         logger.info('Loaded table {0}'.format(table_name))
 
 
+# -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+# -=-=-=-=-=-=-=-=-= HANDLING LOOKUPS IN global_LIONS.txt -=-=-=-=-=-=-=-=-=-=-
+# -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+
+
+def convert_camel_case_field_name(field_name):
+    def add_underscore(match):
+        return '_' + match.group(1)
+    return re.sub(r'(?<!^)([A-Z])', add_underscore, field_name).upper()
+
+
+def extract_global_table(raw_text):
+    header, divider, *fixed_rows = raw_text.split('\n')
+    field_width_matches = tuple(re.finditer(r'-+', divider))
+
+    def split_row(row):
+        def extract_field(match):
+            return row[match.start():match.end()].strip()
+        raw_cells = map(extract_field, field_width_matches)
+        return [(cell if cell != '*' else '') for cell in raw_cells]
+
+    field_names = split_row(header)
+    field_names = tuple(map(convert_camel_case_field_name, field_names))
+    rows = tuple(map(split_row, fixed_rows))
+
+    table_io = StringIO()
+    writer = csv.writer(table_io)
+    writer.writerow(field_names)
+    writer.writerows(rows)
+
+    table_io.seek(0)
+    return table_io
+
+
+def extract_global_tables(raw_text):
+    tables = {}
+
+    table_names = re.findall(r'^([A-Z][^\s]+)$', raw_text, re.MULTILINE)
+    if not table_names:
+        return tables
+
+    def get_table_start(table_name):
+        start_match = re.search(
+            r'(?<=^' + table_name + r'\n\n)', raw_text, re.MULTILINE)
+        return (table_name, start_match.start())
+    table_starts = tuple(map(get_table_start, table_names))
+    last_table_name = table_names[-1]
+
+    def get_table_end(i, table_info):
+        table_name, table_start = table_info
+        if table_name == last_table_name:
+            table_end = None
+        else:
+            table_end = table_starts[i + 1][1]
+        return (table_name, table_start, table_end)
+    table_info = tuple(starmap(get_table_end, enumerate(table_starts)))
+
+    for table_name, table_start, table_end in table_info:
+        global_fragment = raw_text[table_start:table_end]
+        next_name_match = re.search(
+            r'\n*^[A-Z][^\s]+$\s*', global_fragment, re.MULTILINE)
+        if next_name_match:
+            global_fragment = global_fragment[:next_name_match.start()]
+        global_fragment = global_fragment.strip()
+        schema = extract_global_table(global_fragment)
+        tables[table_name] = schema
+
+    return tables
+
+
+def import_global_table(table_name, table_io, connection):
+    logger = logging.getLogger(__name__).getChild('import_global_table')
+
+    only_strings = agate.TypeTester(limit=1, types=(agate.Text(),))
+
+    csv_table = agate.Table.from_csv(
+        table_io, sniff_limit=0, column_types=only_strings)
+    logger.debug('Loaded CSV into agate table')
+
+    csv_table.to_sql(
+        connection, table_name, overwrite=False, create=True,
+        create_if_not_exists=True, insert=True)
+    logger.info('Done loading data into table {0}'.format(table_name))
+
+
 def load_global_file(input_zip, connection):
-    pass
+    logger = logging.getLogger(__name__).getChild('load_global_file')
+
+    try:
+        global_file_info = input_zip.getinfo('global_LIONS.txt')
+    except KeyError:
+        logger.info('No global file detected')
+        return
+
+    with input_zip.open(global_file_info, 'r') as input_file:
+        raw_global_text = input_file.read().decode('utf-8')
+
+    tables = extract_global_tables(raw_global_text)
+    table_names = sorted(tables.keys())
+    logger.debug('Parsed {0} tables in global file: {1}'.format(
+        len(table_names), ', '.join(table_names)))
+
+    for table_name in table_names:
+        import_global_table(table_name, tables[table_name], connection)
+
+
+# -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+# -=-=-=-=-=-=-=- HANDLING LOOKUPS IN INDIVIDUAL TABLE FILES =-=-=-=-=-=-=-=-=-
+# -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
 
 
 def load_lookup_tables(input_zip, connection):
     pass
+
+
+# -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+# -=-=-=-=-=-=-=-=-=-=-=-= TYING EVERYTHING TOGETHER =-=-=-=-=-=-=-=-=-=-=-=-=-
+# -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
 
 
 def main(input_path, database_url):
