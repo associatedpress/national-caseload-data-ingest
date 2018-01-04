@@ -2,8 +2,9 @@
 import csv
 import re
 from io import StringIO, TextIOWrapper
-from itertools import starmap
+from itertools import chain, starmap
 import logging
+from operator import itemgetter
 import sys
 import tempfile
 import zipfile
@@ -169,10 +170,17 @@ def ensure_table_exists(table_name, table_schema, connection):
     table_schema.seek(0)
     schema_reader = csv.DictReader(table_schema)
 
-    def build_column(row):
-        return Column(row['column'], get_field_type(row['field_type']))
+    def build_columns(row):
+        data_column = Column(row['column'], get_field_type(row['field_type']))
+        redaction_column = Column(
+            'redacted_{0}'.format(row['column']), sqlalchemy.types.Boolean)
+        return (data_column, redaction_column)
 
-    columns = tuple(map(build_column, schema_reader))
+    column_pairs = tuple(map(build_columns, schema_reader))
+    data_columns = map(itemgetter(0), column_pairs)
+    redaction_columns = map(itemgetter(1), column_pairs)
+    columns = tuple(chain(data_columns, redaction_columns))
+
     table = Table(table_name, metadata, *columns)
     metadata.create_all()
 
@@ -223,26 +231,37 @@ def load_table(name=None, schema=None, input_zip=None, connection=None):
         wrapped_raw_file.close()
         raw_data_file.close()
 
-        without_asterisks_file = tempfile.TemporaryFile(mode='w+')
-        without_asterisks_writer = csv.writer(without_asterisks_file)
+        with_redactions_file = tempfile.TemporaryFile(mode='w+')
+        with_redactions_writer = csv.writer(with_redactions_file)
         data_csv_reader = csv.reader(data_csv_file)
+        header_written = False
         for raw_row in data_csv_reader:
-            output_row = [(item if item != '*' else '') for item in raw_row]
-            without_asterisks_writer.writerow(output_row)
-        logger.debug('Removed asterisk-only cells')
+            if header_written:
+                data_values = [
+                    (item if item != '*' else '') for item in raw_row]
+                redaction_values = [
+                    ('1' if item == '*' else '0') for item in raw_row]
+            else:
+                data_values = raw_row
+                redaction_values = [
+                    'redacted_{0}'.format(item) for item in raw_row]
+                header_written = True
+            output_row = data_values + redaction_values
+            with_redactions_writer.writerow(output_row)
+        logger.debug('Separated redactions from data values')
         data_csv_file.close()
 
-        without_asterisks_file.seek(0)
+        with_redactions_file.seek(0)
         agate_types = build_agate_types(schema)
         csv_table = agate.Table.from_csv(
-            without_asterisks_file, sniff_limit=0, column_types=agate_types)
+            with_redactions_file, sniff_limit=0, column_types=agate_types)
         logger.debug('Loaded CSV into agate table')
         csv_table.to_sql(
             connection, name, overwrite=False, create=False,
             create_if_not_exists=False, insert=True)
         logger.info('Done loading data file {0} into table {1}'.format(
             data_file_name, name))
-        without_asterisks_file.close()
+        with_redactions_file.close()
 
 
 def import_tables_with_schemas(table_schemas, input_zip, connection):
