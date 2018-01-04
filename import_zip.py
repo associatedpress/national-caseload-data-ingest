@@ -288,20 +288,33 @@ def import_tables_with_schemas(table_schemas, input_zip, connection):
 def convert_camel_case_field_name(field_name):
     def add_underscore(match):
         return '_' + match.group(1)
-    return re.sub(r'(?<!^)([A-Z])', add_underscore, field_name).upper()
+    converted = re.sub(r'(?<!^)([A-Z])', add_underscore, field_name).upper()
+    if converted.startswith('REDACTED__'):
+        converted = converted.replace('REDACTED__', 'redacted_', 1)
+    return converted
 
 
 def extract_global_table(raw_text):
     header, divider, *fixed_rows = raw_text.split('\n')
     field_width_matches = tuple(re.finditer(r'-+', divider))
 
-    def split_row(row):
+    def split_row(row, is_header=False):
         def extract_field(match):
             return row[match.start():match.end()].strip()
-        raw_cells = map(extract_field, field_width_matches)
-        return [(cell if cell != '*' else '') for cell in raw_cells]
+        raw_cells = tuple(map(extract_field, field_width_matches))
 
-    field_names = split_row(header)
+        if is_header:
+            data_cells = list(raw_cells)
+            redaction_cells = [
+                'redacted_{0}'.format(cell) for cell in raw_cells]
+        else:
+            data_cells = [(cell if cell != '*' else '') for cell in raw_cells]
+            redaction_cells = [
+                ('t' if cell == '*' else '') for cell in raw_cells]
+
+        return data_cells + redaction_cells
+
+    field_names = split_row(header, True)
     field_names = tuple(map(convert_camel_case_field_name, field_names))
     rows = tuple(map(split_row, fixed_rows))
 
