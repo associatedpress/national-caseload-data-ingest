@@ -226,7 +226,19 @@ def load_table(name=None, schema=None, input_zip=None, connection=None):
 
         schema.seek(0)
         raw_data_file = input_zip.open(data_file_name)
-        wrapped_raw_file = TextIOWrapper(raw_data_file, encoding='utf-8')
+
+        no_cr_file = tempfile.TemporaryFile(mode='w+b')
+        while True:
+            fix_count = 0
+            raw_chunk = raw_data_file.read(4096)
+            if not raw_chunk:
+                break
+            fixed_chunk = raw_chunk.replace(b'\r', b' ')
+            no_cr_file.write(fixed_chunk)
+        raw_data_file.close()
+        no_cr_file.seek(0)
+
+        wrapped_raw_file = TextIOWrapper(no_cr_file, encoding='utf-8')
 
         data_csv_file = tempfile.TemporaryFile(mode='w+')
         fixed2csv(wrapped_raw_file, schema, output=data_csv_file)
@@ -234,7 +246,6 @@ def load_table(name=None, schema=None, input_zip=None, connection=None):
         logger.debug('Converted raw data file {0} to temporary CSV'.format(
             data_file_name))
         wrapped_raw_file.close()
-        raw_data_file.close()
 
         with_redactions_file = tempfile.TemporaryFile(mode='w+')
         with_redactions_writer = csv.writer(with_redactions_file)
