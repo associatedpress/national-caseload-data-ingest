@@ -212,6 +212,11 @@ def load_table(name=None, schema=None, input_zip=None, connection=None):
             return True
         return file_name.startswith(name.lower() + '_')
     data_file_names = tuple(filter(file_is_for_table, input_zip.namelist()))
+    # If we have a file named exactly for this table, then ignore everything
+    # else; this is in order to distinguish between, for example, GS_CASE and
+    # GS_CASE_CAUSE_ACT.
+    if '{0}.txt'.format(name.lower()) in data_file_names:
+        data_file_names = ('{0}.txt'.format(name.lower()),)
     logger.info('Found {0} file names for table {1}: {2}'.format(
         len(data_file_names), name, ', '.join(data_file_names)))
 
