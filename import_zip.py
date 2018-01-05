@@ -227,6 +227,7 @@ def load_table(name=None, schema=None, input_zip=None, connection=None):
         schema.seek(0)
         raw_data_file = input_zip.open(data_file_name)
 
+        # Replace extraneous carriage returns with benign white space.
         no_cr_file = tempfile.TemporaryFile(mode='w+b')
         while True:
             fix_count = 0
@@ -238,8 +239,10 @@ def load_table(name=None, schema=None, input_zip=None, connection=None):
         raw_data_file.close()
         no_cr_file.seek(0)
 
+        # Ensure the correct encoding.
         wrapped_raw_file = TextIOWrapper(no_cr_file, encoding='utf-8')
 
+        # Convert from fixed-width to a CSV, using csvkit.
         data_csv_file = tempfile.TemporaryFile(mode='w+')
         fixed2csv(wrapped_raw_file, schema, output=data_csv_file)
         data_csv_file.seek(0)
@@ -247,6 +250,7 @@ def load_table(name=None, schema=None, input_zip=None, connection=None):
             data_file_name))
         wrapped_raw_file.close()
 
+        # Add columns to record when values have been redacted.
         with_redactions_file = tempfile.TemporaryFile(mode='w+')
         with_redactions_writer = csv.writer(with_redactions_file)
         data_csv_reader = csv.reader(data_csv_file)
@@ -267,6 +271,8 @@ def load_table(name=None, schema=None, input_zip=None, connection=None):
         logger.debug('Separated redactions from data values')
         data_csv_file.close()
 
+        # Load into agate in order to standardize data types and insert into
+        # the database.
         with_redactions_file.seek(0)
         agate_types = build_agate_types(schema)
         csv_table = agate.Table.from_csv(
