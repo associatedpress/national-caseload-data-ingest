@@ -1,19 +1,23 @@
 #!/usr/bin/env python
 import csv
+import datetime
 import re
 from io import StringIO, TextIOWrapper
 from itertools import chain, starmap
+import json
 import logging
 from operator import itemgetter
+from os import makedirs
+import os.path
+from shutil import copyfileobj
 import sys
 import tempfile
+from textwrap import dedent
 import zipfile
 
 import agate
 import agatesql  # noqa: F401
 from csvkit.convert.fixed import fixed2csv
-from sqlalchemy import Column, create_engine, MetaData, Table
-import sqlalchemy.types
 
 
 logger = logging.getLogger(__name__)
@@ -99,112 +103,113 @@ def extract_table_schemas(input_zip):
     return schemas
 
 
-def get_field_type(field_type_text):
+def get_athena_type(field_type_text):
     field_components = re.match(
         r'(?P<type>[^(]+)(?:\((?P<args>.+)\))?', field_type_text)
     field_type_component = field_components.group('type')
 
     if field_type_component in ('VARCHAR', 'VARCHAR2'):
-        length = int(field_components.group('args'))
-        return sqlalchemy.types.String(length)
+        return 'STRING'
 
     if field_type_component == 'NUMBER':
+        return 'BIGINT'
+
+    if field_type_component == 'DATE':
+        return 'DATE'  # Actually a date in strftime format '%d-%b-%Y'
+
+    if field_type_component == 'FLOAT':
+        return 'DOUBLE'
+
+    raise NotImplementedError(
+        'Unsure how to handle a {0}'.format(field_type_text))
+
+
+def _parse_oracle_date(raw_text):
+    return datetime.datetime.strptime(raw_text, '%d-%b-%Y').strftime(
+        '%Y-%m-%d')
+
+
+def converter_with_nulls(converter):
+    def convert(raw_text):
         try:
-            number_args = tuple(map(
-                int, re.split(r',\s*', field_components.group('args'))))
-        except TypeError:
-            return sqlalchemy.types.BigInteger
-
-        if len(number_args) == 1:
-            length = number_args[0]
-            if length < 10:
-                return sqlalchemy.types.Integer
-            return sqlalchemy.types.BigInteger
-
-        if len(number_args) == 2:
-            return sqlalchemy.types.Numeric(*number_args)
-
-        raise NotImplementedError(
-            'Unsure how to handle a {0}'.format(field_type_text))
-
-    if field_type_component == 'DATE':
-        return sqlalchemy.types.Date
-
-    if field_type_component == 'FLOAT':
-        return sqlalchemy.types.Float
-
-    raise NotImplementedError(
-        'Unsure how to handle a {0}'.format(field_type_text))
+            return converter(raw_text)
+        except ValueError:
+            return None
+    return convert
 
 
-def get_agate_type(field_type_text):
+def get_python_type(field_type_text):
     field_components = re.match(
         r'(?P<type>[^(]+)(?:\((?P<args>.+)\))?', field_type_text)
     field_type_component = field_components.group('type')
 
     if field_type_component in ('VARCHAR', 'VARCHAR2'):
-        return agate.Text()
+        return converter_with_nulls(str)
 
     if field_type_component == 'NUMBER':
-        return agate.Number()
+        return converter_with_nulls(int)
 
     if field_type_component == 'DATE':
-        return agate.Date(date_format='%d-%b-%Y')
+        return converter_with_nulls(_parse_oracle_date)
 
     if field_type_component == 'FLOAT':
-        return agate.Number()
+        return converter_with_nulls(float)
 
     raise NotImplementedError(
         'Unsure how to handle a {0}'.format(field_type_text))
 
 
-def ensure_table_exists(table_name, table_schema, connection):
-    logger = logging.getLogger(__name__).getChild('ensure_table_exists')
-
-    metadata = MetaData(connection)
-    metadata.reflect()
-    if table_name in metadata.tables:
-        logger.debug('Table {0} already exists'.format(table_name))
-        return metadata.tables[table_name]
-
-    table_schema.seek(0)
-    schema_reader = csv.DictReader(table_schema)
-
-    def build_columns(row):
-        data_column = Column(row['column'], get_field_type(row['field_type']))
-        redaction_column = Column(
-            'redacted_{0}'.format(row['column']), sqlalchemy.types.Boolean)
-        return (data_column, redaction_column)
-
-    column_pairs = tuple(map(build_columns, schema_reader))
-    data_columns = map(itemgetter(0), column_pairs)
-    redaction_columns = map(itemgetter(1), column_pairs)
-    columns = tuple(chain(data_columns, redaction_columns))
-
-    table = Table(table_name, metadata, *columns)
-    metadata.create_all()
-
-    logger.info('Created table {0}'.format(table_name))
-
-    return table
-
-
-def build_agate_types(table_schema):
-    logger = logging.getLogger(__name__).getChild('build_agate_types')
-
+def gather_python_types(table_schema):
     table_schema.seek(0)
     schema_reader = csv.DictReader(table_schema)
 
     def build_column(row):
-        return (row['column'], get_agate_type(row['field_type']))
-    columns = dict(map(build_column, schema_reader))
+        return (row['column'], get_python_type(row['field_type']))
 
-    logger.info('Converted column types for agate')
-
-    return columns
+    return dict(map(build_column, schema_reader))
 
 
-def load_table(name=None, schema=None, input_zip=None, connection=None):
+def generate_ddl(name, table_schema):
+    table_schema.seek(0)
+    schema_reader = csv.DictReader(table_schema)
+
+    def build_column(row):
+        data_column = '{0} {1}'.format(
+            row['column'], get_athena_type(row['field_type']))
+        redaction_column = 'redacted_{0} BOOLEAN'.format(row['column'])
+        return (data_column, redaction_column)
+
+    column_pairs = tuple(map(build_column, schema_reader))
+    data_columns = map(itemgetter(0), column_pairs)
+    redaction_columns = map(itemgetter(1), column_pairs)
+    columns = tuple(chain(data_columns, redaction_columns))
+    column_specs = ',\n            '.join(columns)
+
+    query = """
+        CREATE EXTERNAL TABLE {name} (
+            {columns}
+        )
+        ROW FORMAT SERDE 'org.apache.hive.hcatalog.data.JsonSerDe'
+        STORED AS TEXTFILE
+        LOCATION 's3://associatedpress-datateam-athena-data/ncd/test-monthly/{name}';
+    """.format(name=name, columns=column_specs)  # noqa: E501
+
+    return dedent(query)
+
+
+def remove_cr_from_file(input_file):
+    no_cr_file = tempfile.TemporaryFile(mode='w+b')
+    while True:
+        raw_chunk = input_file.read(4096)
+        if not raw_chunk:
+            break
+        fixed_chunk = raw_chunk.replace(b'\r', b' ')
+        no_cr_file.write(fixed_chunk)
+    no_cr_file.seek(0)
+    return no_cr_file
+
+
+def load_table(name=None, schema=None, input_zip=None):
     logger = logging.getLogger(__name__).getChild('load_table')
 
     def file_is_for_table(file_name):
@@ -221,25 +226,12 @@ def load_table(name=None, schema=None, input_zip=None, connection=None):
         len(data_file_names), name, ', '.join(data_file_names)))
 
     for data_file_name in data_file_names:
-        ensure_table_exists(name, schema, connection)
-        logger.debug('Ensured table {0} exists'.format(name))
-
         schema.seek(0)
         raw_data_file = input_zip.open(data_file_name)
 
-        # Replace extraneous carriage returns with benign white space.
-        no_cr_file = tempfile.TemporaryFile(mode='w+b')
-        while True:
-            fix_count = 0
-            raw_chunk = raw_data_file.read(4096)
-            if not raw_chunk:
-                break
-            fixed_chunk = raw_chunk.replace(b'\r', b' ')
-            no_cr_file.write(fixed_chunk)
+        # Replace extraneous carriage returns, and ensure the correct encoding.
+        no_cr_file = remove_cr_from_file(raw_data_file)
         raw_data_file.close()
-        no_cr_file.seek(0)
-
-        # Ensure the correct encoding.
         wrapped_raw_file = TextIOWrapper(no_cr_file, encoding='utf-8')
 
         # Convert from fixed-width to a CSV, using csvkit.
@@ -252,41 +244,44 @@ def load_table(name=None, schema=None, input_zip=None, connection=None):
 
         # Add columns to record when values have been redacted.
         with_redactions_file = tempfile.TemporaryFile(mode='w+')
-        with_redactions_writer = csv.writer(with_redactions_file)
-        data_csv_reader = csv.reader(data_csv_file)
-        header_written = False
-        for raw_row in data_csv_reader:
-            if header_written:
-                data_values = [
-                    (item if item != '*' else '') for item in raw_row]
-                redaction_values = [
-                    ('1' if item == '*' else '0') for item in raw_row]
-            else:
-                data_values = raw_row
-                redaction_values = [
-                    'redacted_{0}'.format(item) for item in raw_row]
-                header_written = True
-            output_row = data_values + redaction_values
-            with_redactions_writer.writerow(output_row)
-        logger.debug('Separated redactions from data values')
+        data_csv_reader = csv.DictReader(data_csv_file)
+        field_converters = gather_python_types(schema)
+        for input_row in data_csv_reader:
+            output_obj = {}
+            for field_name, field_raw_value in input_row.items():
+                if field_raw_value == '*':
+                    field_value = None
+                    redacted_value = True
+                else:
+                    field_value = field_converters[field_name](field_raw_value)
+                    redacted_value = False
+                output_obj[field_name] = field_value
+                output_obj['redacted_{0}'.format(field_name)] = redacted_value
+            with_redactions_file.write(json.dumps(output_obj))
+            with_redactions_file.write('\n')
+        logger.debug('Separated redactions from data values; generated JSON')
         data_csv_file.close()
 
-        # Load into agate in order to standardize data types and insert into
-        # the database.
+        # Copy the finished CSV to the destination. Currently this is on disk,
+        # but eventually we'll make it go to S3 instead.
         with_redactions_file.seek(0)
-        agate_types = build_agate_types(schema)
-        csv_table = agate.Table.from_csv(
-            with_redactions_file, sniff_limit=0, column_types=agate_types)
-        logger.debug('Loaded CSV into agate table')
-        csv_table.to_sql(
-            connection, name, overwrite=False, create=False,
-            create_if_not_exists=False, insert=True)
-        logger.info('Done loading data file {0} into table {1}'.format(
-            data_file_name, name))
+        output_dir = os.path.join('tables', name)
+        makedirs(output_dir, exist_ok=True)
+        output_path = os.path.join(output_dir, '{0}.json'.format(name))
+        with open(output_path, 'w') as output_file:
+            copyfileobj(with_redactions_file, output_file)
+        logger.debug('Saved {0} to {1}'.format(name, output_path))
         with_redactions_file.close()
 
+        # Generate a DDL query for this table. Currently we save this to disk,
+        # but eventually we'll run it directly on Athena.
+        ddl = generate_ddl(name, schema)
+        with open('{0}.sql'.format(name), 'w') as output_file:
+            output_file.write(ddl)
+        logger.debug('Saved {name} DDL to {name}.sql'.format(name=name))
 
-def import_tables_with_schemas(table_schemas, input_zip, connection):
+
+def import_tables_with_schemas(table_schemas, input_zip):
     logger = logging.getLogger(__name__).getChild('import_tables_with_schemas')
 
     logger.info('Found {0} table schemas: {1}'.format(
@@ -296,9 +291,7 @@ def import_tables_with_schemas(table_schemas, input_zip, connection):
     table_names = sorted(table_schemas.keys())
     for table_name in table_names:
         table_schema = table_schemas[table_name]
-        load_table(
-            name=table_name, schema=table_schema, input_zip=input_zip,
-            connection=connection)
+        load_table(name=table_name, schema=table_schema, input_zip=input_zip)
         logger.info('Loaded table {0}'.format(table_name))
 
 
@@ -385,7 +378,7 @@ def extract_global_tables(raw_text):
     return tables
 
 
-def import_global_table(table_name, table_io, connection):
+def import_global_table(table_name, table_io):
     logger = logging.getLogger(__name__).getChild('import_global_table')
 
     only_strings = agate.TypeTester(limit=1, types=(agate.Text(),))
@@ -400,7 +393,7 @@ def import_global_table(table_name, table_io, connection):
     logger.info('Done loading data into table {0}'.format(table_name))
 
 
-def load_global_file(input_zip, connection):
+def load_global_file(input_zip):
     logger = logging.getLogger(__name__).getChild('load_global_file')
 
     try:
@@ -418,7 +411,7 @@ def load_global_file(input_zip, connection):
         len(table_names), ', '.join(table_names)))
 
     for table_name in table_names:
-        import_global_table(table_name, tables[table_name], connection)
+        import_global_table(table_name, tables[table_name])
 
 
 # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
@@ -426,7 +419,7 @@ def load_global_file(input_zip, connection):
 # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
 
 
-def load_lookup_tables(input_zip, connection):
+def load_lookup_tables(input_zip):
     logger = logging.getLogger(__name__).getChild('load_lookup_tables')
 
     lookup_table_file_names = sorted(tuple(filter(
@@ -450,7 +443,7 @@ def load_lookup_tables(input_zip, connection):
         table_io = extract_global_table(raw_table)
         logger.debug('Extracted lookup table {0}'.format(table_name))
 
-        import_global_table(table_name, table_io, connection)
+        import_global_table(table_name, table_io)
 
 
 # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
@@ -461,20 +454,15 @@ def load_lookup_tables(input_zip, connection):
 def main(input_path, database_url):
     logger = logging.getLogger(__name__).getChild('main')
 
-    engine = create_engine(database_url)
-    connection = engine.connect()
-    logger.info('Connected to database at {0}'.format(database_url))
-
     with zipfile.ZipFile(input_path, 'r') as input_zip:
         logger.info('Opened input file {0}'.format(input_path))
 
         table_schemas = extract_table_schemas(input_zip)
-        import_tables_with_schemas(table_schemas, input_zip, connection)
+        import_tables_with_schemas(table_schemas, input_zip)
 
         load_global_file(input_zip, connection)
         load_lookup_tables(input_zip, connection)
 
-    connection.close()
     logger.info('Done')
 
 
