@@ -2,4 +2,6 @@
 desktop.ini
 __pycache__
 source/
+tables/
+ddl/
 tmp/
