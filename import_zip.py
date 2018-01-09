@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import csv
 import datetime
+import gzip
 import re
 from io import StringIO, TextIOWrapper
 from itertools import chain, starmap
@@ -234,11 +235,12 @@ def separate_redactions(input_file, schema):
     return output_file
 
 
-def save_file(file_obj, dest_path):
+def save_gzip_file(file_obj, dest_path):
     file_obj.seek(0)
     makedirs(os.path.dirname(dest_path), exist_ok=True)
-    with open(dest_path, 'w') as output_file:
-        copyfileobj(file_obj, output_file)
+    with gzip.open(dest_path, 'wb') as output_file:
+        output_text_file = TextIOWrapper(output_file, encoding='utf-8')
+        copyfileobj(file_obj, output_text_file)
 
 
 def load_table(name=None, schema=None, input_zip=None):
@@ -284,8 +286,8 @@ def load_table(name=None, schema=None, input_zip=None):
         # Copy the finished CSV to the destination. Currently this is on disk,
         # but eventually we'll make it go to S3 instead.
         output_dir = os.path.join('tables', name)
-        output_path = os.path.join(output_dir, '{0}.json'.format(name))
-        save_file(with_redactions_file, output_path)
+        output_path = os.path.join(output_dir, '{0}.json.gz'.format(name))
+        save_gzip_file(with_redactions_file, output_path)
         logger.debug('Saved {0} to {1}'.format(name, output_path))
         with_redactions_file.close()
 
@@ -458,8 +460,9 @@ def load_global_file(input_zip):
     for table_name in table_names:
         json_file = global_csv_to_json(tables[table_name])
         output_dir = os.path.join('tables', table_name)
-        output_path = os.path.join(output_dir, '{0}.json'.format(table_name))
-        save_file(json_file, output_path)
+        output_path = os.path.join(
+            output_dir, '{0}.json.gz'.format(table_name))
+        save_gzip_file(json_file, output_path)
         logger.debug('Saved {0} to {1}'.format(table_name, output_path))
 
         # Generate a DDL query for this table. Currently we save this to disk,
@@ -501,8 +504,9 @@ def load_lookup_tables(input_zip):
 
         json_file = global_csv_to_json(table_io)
         output_dir = os.path.join('tables', table_name)
-        output_path = os.path.join(output_dir, '{0}.json'.format(table_name))
-        save_file(json_file, output_path)
+        output_path = os.path.join(
+            output_dir, '{0}.json.gz'.format(table_name))
+        save_gzip_file(json_file, output_path)
         logger.debug('Saved {0} to {1}'.format(table_name, output_path))
 
         # Generate a DDL query for this table. Currently we save this to disk,
