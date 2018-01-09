@@ -411,6 +411,50 @@ def import_global_table(table_name, table_io):
     logger.info('Done loading data into table {0}'.format(table_name))
 
 
+def generate_global_ddl(name, table_io):
+    table_io.seek(0)
+    reader = csv.reader(table_io)
+    field_names = next(reader)
+
+    def build_column(field_name):
+        if field_name.startswith('redacted_'):
+            return '{0} BOOLEAN'.format(field_name)
+        else:
+            return '{0} STRING'.format(field_name)
+
+    columns = tuple(map(build_column, field_names))
+    column_specs = ',\n            '.join(columns)
+
+    query = """
+        CREATE EXTERNAL TABLE {name} (
+            {columns}
+        )
+        ROW FORMAT SERDE 'org.apache.hive.hcatalog.data.JsonSerDe'
+        STORED AS TEXTFILE
+        LOCATION 's3://associatedpress-datateam-athena-data/ncd/test-monthly/{name}';
+    """.format(name=name, columns=column_specs)  # noqa: E501
+
+    return dedent(query)
+
+
+def global_csv_to_json(table_io):
+    table_io.seek(0)
+    reader = csv.DictReader(table_io)
+
+    output_io = StringIO()
+    for input_row in reader:
+        output_row = {}
+        for key, value in input_row.items():
+            if key.startswith('redacted_'):
+                output_row[key] = bool(value)
+            else:
+                output_row[key] = value
+        output_io.write(json.dumps(output_row))
+        output_io.write('\n')
+
+    return output_io
+
+
 def load_global_file(input_zip):
     logger = logging.getLogger(__name__).getChild('load_global_file')
 
@@ -429,7 +473,18 @@ def load_global_file(input_zip):
         len(table_names), ', '.join(table_names)))
 
     for table_name in table_names:
-        import_global_table(table_name, tables[table_name])
+        json_file = global_csv_to_json(tables[table_name])
+        output_dir = os.path.join('tables', table_name)
+        output_path = os.path.join(output_dir, '{0}.json'.format(table_name))
+        save_file(json_file, output_path)
+        logger.debug('Saved {0} to {1}'.format(table_name, output_path))
+
+        # Generate a DDL query for this table. Currently we save this to disk,
+        # but eventually we'll run it directly on Athena.
+        ddl = generate_global_ddl(table_name, tables[table_name])
+        with open('{0}.sql'.format(table_name), 'w') as output_file:
+            output_file.write(ddl)
+        logger.debug('Saved {name} DDL to {name}.sql'.format(name=table_name))
 
 
 # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
@@ -478,7 +533,7 @@ def main(input_path, database_url):
         table_schemas = extract_table_schemas(input_zip)
         import_tables_with_schemas(table_schemas, input_zip)
 
-        load_global_file(input_zip, connection)
+        load_global_file(input_zip)
         load_lookup_tables(input_zip, connection)
 
     logger.info('Done')
