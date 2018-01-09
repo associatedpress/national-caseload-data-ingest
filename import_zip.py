@@ -294,9 +294,12 @@ def load_table(name=None, schema=None, input_zip=None):
         # Generate a DDL query for this table. Currently we save this to disk,
         # but eventually we'll run it directly on Athena.
         ddl = generate_ddl(name, schema)
-        with open('{0}.sql'.format(name), 'w') as output_file:
+        output_path = os.path.join('ddl', '{0}.sql'.format(name))
+        makedirs(os.path.dirname(output_path), exist_ok=True)
+        with open(output_path, 'w') as output_file:
             output_file.write(ddl)
-        logger.debug('Saved {name} DDL to {name}.sql'.format(name=name))
+        logger.debug('Saved {name} DDL to {output_path}'.format(
+            name=name, output_path=output_path))
 
 
 def import_tables_with_schemas(table_schemas, input_zip):
@@ -468,9 +471,12 @@ def load_global_file(input_zip):
         # Generate a DDL query for this table. Currently we save this to disk,
         # but eventually we'll run it directly on Athena.
         ddl = generate_global_ddl(table_name, tables[table_name])
-        with open('{0}.sql'.format(table_name), 'w') as output_file:
+        output_path = os.path.join('ddl', '{0}.sql'.format(table_name))
+        makedirs(os.path.dirname(output_path), exist_ok=True)
+        with open(output_path, 'w') as output_file:
             output_file.write(ddl)
-        logger.debug('Saved {name} DDL to {name}.sql'.format(name=table_name))
+        logger.debug('Saved {name} DDL to {output_path}'.format(
+            name=table_name, output_path=output_path))
 
 
 # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
@@ -512,9 +518,12 @@ def load_lookup_tables(input_zip):
         # Generate a DDL query for this table. Currently we save this to disk,
         # but eventually we'll run it directly on Athena.
         ddl = generate_global_ddl(table_name, table_io)
-        with open('{0}.sql'.format(table_name), 'w') as output_file:
+        output_path = os.path.join('ddl', '{0}.sql'.format(table_name))
+        makedirs(os.path.dirname(output_path), exist_ok=True)
+        with open(output_path, 'w') as output_file:
             output_file.write(ddl)
-        logger.debug('Saved {name} DDL to {name}.sql'.format(name=table_name))
+        logger.debug('Saved {name} DDL to {output_path}'.format(
+            name=table_name, output_path=output_path))
 
 
 # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
