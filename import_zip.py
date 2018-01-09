@@ -2,7 +2,6 @@
 import csv
 import datetime
 import gzip
-import re
 from io import StringIO, TextIOWrapper
 from itertools import chain, starmap
 import json
@@ -10,6 +9,7 @@ import logging
 from operator import itemgetter
 from os import makedirs
 import os.path
+import re
 from shutil import copyfileobj
 import sys
 import tempfile
