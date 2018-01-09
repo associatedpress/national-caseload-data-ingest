@@ -531,7 +531,7 @@ def load_lookup_tables(input_zip):
 # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
 
 
-def main(input_path, database_url):
+def main(input_path):
     logger = logging.getLogger(__name__).getChild('main')
 
     with zipfile.ZipFile(input_path, 'r') as input_zip:
@@ -547,9 +547,9 @@ def main(input_path, database_url):
 
 
 if __name__ == '__main__':
-    if len(sys.argv) != 3:
+    if len(sys.argv) != 2:
         sys.stderr.write(
-            'Usage: {0} input_path database_url\n'.format(sys.argv[0]))
+            'Usage: {0} input_path\n'.format(sys.argv[0]))
         sys.exit(1)
 
     main(*sys.argv[1:])
