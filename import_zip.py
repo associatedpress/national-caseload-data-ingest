@@ -209,6 +209,40 @@ def remove_cr_from_file(input_file):
     return no_cr_file
 
 
+def separate_redactions(input_file, schema):
+    logger = logging.getLogger(__name__).getChild('separate_redactions')
+
+    field_converters = gather_python_types(schema)
+
+    output_file = tempfile.TemporaryFile(mode='w+')
+    input_reader = csv.DictReader(input_file)
+
+    for input_row in input_reader:
+        output_obj = {}
+        for field_name, field_raw_value in input_row.items():
+            if field_raw_value == '*':
+                field_value = None
+                redacted_value = True
+            else:
+                field_value = field_converters[field_name](field_raw_value)
+                redacted_value = False
+            output_obj[field_name] = field_value
+            output_obj['redacted_{0}'.format(field_name)] = redacted_value
+        output_file.write(json.dumps(output_obj))
+        output_file.write('\n')
+
+    logger.debug('Separated redactions from data values; generated JSON')
+
+    return output_file
+
+
+def save_file(file_obj, dest_path):
+    file_obj.seek(0)
+    makedirs(os.path.dirname(dest_path), exist_ok=True)
+    with open(dest_path, 'w') as output_file:
+        copyfileobj(file_obj, output_file)
+
+
 def load_table(name=None, schema=None, input_zip=None):
     logger = logging.getLogger(__name__).getChild('load_table')
 
@@ -243,33 +277,17 @@ def load_table(name=None, schema=None, input_zip=None):
         wrapped_raw_file.close()
 
         # Add columns to record when values have been redacted.
-        with_redactions_file = tempfile.TemporaryFile(mode='w+')
-        data_csv_reader = csv.DictReader(data_csv_file)
-        field_converters = gather_python_types(schema)
-        for input_row in data_csv_reader:
-            output_obj = {}
-            for field_name, field_raw_value in input_row.items():
-                if field_raw_value == '*':
-                    field_value = None
-                    redacted_value = True
-                else:
-                    field_value = field_converters[field_name](field_raw_value)
-                    redacted_value = False
-                output_obj[field_name] = field_value
-                output_obj['redacted_{0}'.format(field_name)] = redacted_value
-            with_redactions_file.write(json.dumps(output_obj))
-            with_redactions_file.write('\n')
-        logger.debug('Separated redactions from data values; generated JSON')
+        with_redactions_file = separate_redactions(data_csv_file, schema)
         data_csv_file.close()
+
+        # TODO: Partition data.
+        # TODO: Compress data.
 
         # Copy the finished CSV to the destination. Currently this is on disk,
         # but eventually we'll make it go to S3 instead.
-        with_redactions_file.seek(0)
         output_dir = os.path.join('tables', name)
-        makedirs(output_dir, exist_ok=True)
         output_path = os.path.join(output_dir, '{0}.json'.format(name))
-        with open(output_path, 'w') as output_file:
-            copyfileobj(with_redactions_file, output_file)
+        save_file(with_redactions_file, output_path)
         logger.debug('Saved {0} to {1}'.format(name, output_path))
         with_redactions_file.close()
 
