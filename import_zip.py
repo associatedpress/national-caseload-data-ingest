@@ -516,7 +516,18 @@ def load_lookup_tables(input_zip):
         table_io = extract_global_table(raw_table)
         logger.debug('Extracted lookup table {0}'.format(table_name))
 
-        import_global_table(table_name, table_io)
+        json_file = global_csv_to_json(table_io)
+        output_dir = os.path.join('tables', table_name)
+        output_path = os.path.join(output_dir, '{0}.json'.format(table_name))
+        save_file(json_file, output_path)
+        logger.debug('Saved {0} to {1}'.format(table_name, output_path))
+
+        # Generate a DDL query for this table. Currently we save this to disk,
+        # but eventually we'll run it directly on Athena.
+        ddl = generate_global_ddl(table_name, table_io)
+        with open('{0}.sql'.format(table_name), 'w') as output_file:
+            output_file.write(ddl)
+        logger.debug('Saved {name} DDL to {name}.sql'.format(name=table_name))
 
 
 # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
@@ -534,7 +545,7 @@ def main(input_path, database_url):
         import_tables_with_schemas(table_schemas, input_zip)
 
         load_global_file(input_zip)
-        load_lookup_tables(input_zip, connection)
+        load_lookup_tables(input_zip)
 
     logger.info('Done')
 
