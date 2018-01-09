@@ -15,8 +15,6 @@ import tempfile
 from textwrap import dedent
 import zipfile
 
-import agate
-import agatesql  # noqa: F401
 from csvkit.convert.fixed import fixed2csv
 
 
@@ -394,21 +392,6 @@ def extract_global_tables(raw_text):
         tables[table_name] = schema
 
     return tables
-
-
-def import_global_table(table_name, table_io):
-    logger = logging.getLogger(__name__).getChild('import_global_table')
-
-    only_strings = agate.TypeTester(limit=1, types=(agate.Text(),))
-
-    csv_table = agate.Table.from_csv(
-        table_io, sniff_limit=0, column_types=only_strings)
-    logger.debug('Loaded CSV into agate table')
-
-    csv_table.to_sql(
-        connection, table_name, overwrite=True, create=True,
-        create_if_not_exists=True, insert=True)
-    logger.info('Done loading data into table {0}'.format(table_name))
 
 
 def generate_global_ddl(name, table_io):
