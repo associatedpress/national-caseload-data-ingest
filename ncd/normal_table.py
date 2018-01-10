@@ -58,7 +58,7 @@ class NormalTable(object):
                     self._convert_raw_file(data_file_name, text_gzip_file)
             self._athena.upload_data(self._name, raw_file)
         ddl = self._generate_ddl()
-        self._athena.execute_ddl(ddl)
+        self._athena.execute_query(ddl)
 
     # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
     # -=-=-=-=-=-=-=-=-=-=- INTERNAL METHODS FOLLOW -=-=-=-=-=-=-=-=-=-=-=-=-=-
@@ -166,7 +166,8 @@ class NormalTable(object):
             STORED AS TEXTFILE
             LOCATION 's3://{bucket}/{table_prefix}';
         """.format(
-            name=self._name, columns=column_specs, bucket=self._athena.bucket,
+            name=self._name, columns=column_specs,
+            bucket=self._athena.data_bucket,
             table_prefix=self._athena.prefix_for_table(self._name)
         )
 
