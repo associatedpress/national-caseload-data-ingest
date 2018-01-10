@@ -14,6 +14,10 @@ class AthenaMock(object):
             will be saved.
     """
     def __init__(self, data_bucket=None, results_bucket=None, s3_prefix=None):
+        self.data_bucket = data_bucket
+        self.results_bucket = results_bucket
+        self.s3_prefix = s3_prefix
+
         self._base_dir = Path(s3_prefix)
 
         self._query_dir = self._base_dir / 'queries'

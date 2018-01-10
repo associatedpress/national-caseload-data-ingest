@@ -56,10 +56,10 @@ class NormalTable(object):
                 text_gzip_file = TextIOWrapper(gzip_file, encoding='utf-8')
                 for data_file_name in data_file_names:
                     self._convert_raw_file(data_file_name, text_gzip_file)
-            self._athena.upload_data(self._name, raw_file)
+            self._athena.upload_data(self.name, raw_file)
         ddl = self._generate_ddl()
         self._athena.execute_query(ddl)
-        self.logger.info('Loaded normal table {0}'.format(self._name))
+        self.logger.info('Loaded normal table {0}'.format(self.name))
 
     # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
     # -=-=-=-=-=-=-=-=-=-=- INTERNAL METHODS FOLLOW -=-=-=-=-=-=-=-=-=-=-=-=-=-
@@ -167,9 +167,9 @@ class NormalTable(object):
             STORED AS TEXTFILE
             LOCATION 's3://{bucket}/{table_prefix}';
         """.format(
-            name=self._name, columns=column_specs,
+            name=self.name, columns=column_specs,
             bucket=self._athena.data_bucket,
-            table_prefix=self._athena.prefix_for_table(self._name)
+            table_prefix=self._athena.prefix_for_table(self.name)
         )
 
         return dedent(query)
