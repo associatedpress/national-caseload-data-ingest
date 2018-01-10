@@ -159,7 +159,7 @@ class NormalTable(object):
         column_specs = ',\n            '.join(columns)
 
         query = """
-            CREATE EXTERNAL TABLE {name} (
+            CREATE EXTERNAL TABLE IF NOT EXISTS {name} (
                 {columns}
             )
             ROW FORMAT SERDE 'org.apache.hive.hcatalog.data.JsonSerDe'
