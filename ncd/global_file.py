@@ -1,5 +1,5 @@
 from csv import DictReader, reader, writer
-from gzip import GzipFile
+import gzip
 from io import StringIO, TextIOWrapper
 from itertools import starmap
 import json
@@ -227,7 +227,7 @@ class GlobalFile(object):
             table: A text file-like object with table data.
         """
         with NamedTemporaryFile('w+b') as raw_file:
-            with GzipFile(fileobj=raw_file) as gzip_file:
+            with gzip.open(raw_file, 'wb') as gzip_file:
                 text_gzip_file = TextIOWrapper(gzip_file, encoding='utf-8')
                 self._convert_raw_file(table, text_gzip_file)
             self._athena.upload_data(name, raw_file)

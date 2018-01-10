@@ -38,7 +38,7 @@ class AthenaMock(object):
         """
         timestamp = datetime.now().isoformat()
         output_path = self._query_dir / '{0}.sql'.format(timestamp)
-        with open(output_path, 'w') as output_file:
+        with output_path.open('w') as output_file:
             output_file.write(sql_string)
 
     def prefix_for_table(self, table_name):
@@ -62,7 +62,7 @@ class AthenaMock(object):
         output_path = self._table_dir / table_name / '{0}.json.gz'.format(
             table_name)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(output_path, 'wb') as output_file:
+        with output_path.open('wb') as output_file:
             copyfileobj(file_obj, output_file)
 
     # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-

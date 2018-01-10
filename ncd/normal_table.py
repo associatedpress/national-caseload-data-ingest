@@ -1,6 +1,6 @@
 from csv import DictReader
 import datetime
-from gzip import GzipFile
+import gzip
 from io import TextIOWrapper
 from itertools import chain
 import json
@@ -52,7 +52,7 @@ class NormalTable(object):
         """Load this table's data into Athena."""
         data_file_names = self._get_file_names()
         with NamedTemporaryFile('w+b') as raw_file:
-            with GzipFile(fileobj=raw_file) as gzip_file:
+            with gzip.open(raw_file, 'wb') as gzip_file:
                 text_gzip_file = TextIOWrapper(gzip_file, encoding='utf-8')
                 for data_file_name in data_file_names:
                     self._convert_raw_file(data_file_name, text_gzip_file)
