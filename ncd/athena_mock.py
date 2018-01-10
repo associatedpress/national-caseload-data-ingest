@@ -62,6 +62,7 @@ class AthenaMock(object):
         output_path = self._table_dir / table_name / '{0}.json.gz'.format(
             table_name)
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        file_obj.seek(0)
         with output_path.open('wb') as output_file:
             copyfileobj(file_obj, output_file)
 

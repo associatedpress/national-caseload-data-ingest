@@ -56,6 +56,7 @@ class NormalTable(object):
                 text_gzip_file = TextIOWrapper(gzip_file, encoding='utf-8')
                 for data_file_name in data_file_names:
                     self._convert_raw_file(data_file_name, text_gzip_file)
+                text_gzip_file.close()
             self._athena.upload_data(self.name, raw_file)
         ddl = self._generate_ddl()
         self._athena.execute_query(ddl)
