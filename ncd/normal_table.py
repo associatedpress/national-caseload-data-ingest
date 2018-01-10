@@ -59,6 +59,7 @@ class NormalTable(object):
             self._athena.upload_data(self._name, raw_file)
         ddl = self._generate_ddl()
         self._athena.execute_query(ddl)
+        self.logger.info('Loaded normal table {0}'.format(self._name))
 
     # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
     # -=-=-=-=-=-=-=-=-=-=- INTERNAL METHODS FOLLOW -=-=-=-=-=-=-=-=-=-=-=-=-=-

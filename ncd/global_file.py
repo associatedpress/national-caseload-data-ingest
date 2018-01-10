@@ -43,6 +43,7 @@ class GlobalFile(object):
         table_names = sorted(tables.keys())
         for table_name in table_names:
             self._load_table(table_name, tables[table_name])
+            self.logger.info('Loaded global table {0}'.format(table_name))
 
     # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
     # -=-=-=-=-=-=-=-=-=-=- INTERNAL METHODS FOLLOW -=-=-=-=-=-=-=-=-=-=-=-=-=-
