@@ -38,7 +38,10 @@ class GlobalFile(object):
 
     def load(self):
         """Load all tables from this file into Athena."""
-        raw_content = self._get_raw_content()
+        try:
+            raw_content = self._get_raw_content()
+        except KeyError:
+            return
         tables = self._extract_global_tables(raw_content)
         table_names = sorted(tables.keys())
         for table_name in table_names:
