@@ -73,14 +73,14 @@ class NormalTable(object):
             gzip_file: A file-like object to which our newly converted data
                 should be appended.
         """
-        self._logger.debug('Beginning conversion of {0}'.format(raw_path))
+        self.logger.debug('Beginning conversion of {0}'.format(raw_path))
 
         with self._zip.open(raw_path) as raw_data:
             without_carriage_returns = self._remove_crs(raw_data)
         csv_data = self._make_csv(without_carriage_returns)
         self._generate_rows(csv_data, gzip_file)
 
-        self._logger.debug('Completed conversion of {0}'.format(raw_path))
+        self.logger.debug('Completed conversion of {0}'.format(raw_path))
 
     def _gather_python_types(self):
         """Determine which Python data type each field should have.
