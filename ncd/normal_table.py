@@ -176,7 +176,7 @@ class NormalTable(object):
         data_columns = map(itemgetter(0), column_pairs)
         redaction_columns = map(itemgetter(1), column_pairs)
         columns = tuple(chain(data_columns, redaction_columns))
-        column_specs = ',\n            '.join(columns)
+        column_specs = ',\n                '.join(columns)
 
         if is_partitioned:
             partition_clause = (

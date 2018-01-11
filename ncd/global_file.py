@@ -187,7 +187,7 @@ class GlobalFile(object):
                 return '{0} STRING'.format(field_name)
 
         columns = tuple(map(build_column, field_names))
-        column_specs = ',\n            '.join(columns)
+        column_specs = ',\n                '.join(columns)
 
         query = """
             CREATE EXTERNAL TABLE IF NOT EXISTS {name} (
