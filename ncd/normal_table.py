@@ -234,6 +234,7 @@ class NormalTable(object):
         Returns:
             A text file-like object containing CSV data.
         """
+        self._schema.seek(0)
         fixed_width_data.seek(0)
         fixed_width_text = TextIOWrapper(fixed_width_data, encoding='utf-8')
 
