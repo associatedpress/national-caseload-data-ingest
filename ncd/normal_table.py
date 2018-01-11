@@ -51,15 +51,28 @@ class NormalTable(object):
     def load(self):
         """Load this table's data into Athena."""
         data_file_names = self._get_file_names()
-        with NamedTemporaryFile('w+b') as raw_file:
-            with gzip.open(raw_file, 'wb') as gzip_file:
-                text_gzip_file = TextIOWrapper(gzip_file, encoding='utf-8')
-                for data_file_name in data_file_names:
-                    self._convert_raw_file(data_file_name, text_gzip_file)
-                text_gzip_file.close()
-            self._athena.upload_data(self.name, raw_file)
-        ddl = self._generate_ddl()
+        districts = sorted(data_file_names.keys())
+        for district in districts:
+            district_file_name = data_file_names[district]
+            with NamedTemporaryFile('w+b') as raw_file:
+                with gzip.open(raw_file, 'wb') as gzip_file:
+                    text_gzip_file = TextIOWrapper(gzip_file, encoding='utf-8')
+                    self._convert_raw_file(district_file_name, text_gzip_file)
+                    text_gzip_file.close()
+                self._athena.upload_data(
+                    self.name, raw_file, district=district)
+
+        is_partitioned = None not in districts
+
+        ddl = self._generate_ddl(is_partitioned)
         self._athena.execute_query(ddl)
+        self.logger.debug('Ensured table exists for {0}'.format(self.name))
+
+        if is_partitioned:
+            self._athena.execute_query(
+                'MSCK REPAIR TABLE {0};'.format(self.name))
+            self.logger.debug('Repaired table for {0}'.format(self.name))
+
         self.logger.info('Loaded normal table {0}'.format(self.name))
 
     # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
@@ -124,8 +137,13 @@ class NormalTable(object):
 
         return dict(map(build_column, schema_reader))
 
-    def _generate_ddl(self):
+    def _generate_ddl(self, is_partitioned=False):
         """Generate a CREATE EXTERNAL TABLE query to run on Athena.
+
+        Args:
+            is_partitioned: A boolean specifying whether a table is to be split
+                into multiple files by federal judicial district (True) or
+                consists of only one file covering all districts (False).
 
         Returns:
             A string SQL query to execute.
@@ -160,15 +178,22 @@ class NormalTable(object):
         columns = tuple(chain(data_columns, redaction_columns))
         column_specs = ',\n            '.join(columns)
 
+        if is_partitioned:
+            partition_clause = (
+                '\n            PARTITIONED BY (filename_district STRING)')
+        else:
+            partition_clause = ''
+
         query = """
             CREATE EXTERNAL TABLE IF NOT EXISTS {name} (
                 {columns}
-            )
+            ){partition_clause}
             ROW FORMAT SERDE 'org.apache.hive.hcatalog.data.JsonSerDe'
             STORED AS TEXTFILE
             LOCATION 's3://{bucket}/{table_prefix}';
         """.format(
             name=self.name, columns=column_specs,
+            partition_clause=partition_clause,
             bucket=self._athena.data_bucket,
             table_prefix=self._athena.prefix_for_table(self.name)
         )
@@ -203,24 +228,22 @@ class NormalTable(object):
         """Determine which contents to use from our zip file.
 
         Returns:
-            A tuple of string filenames to use within self._zip.
+            A dict. Each key specifies the federal judicial district covered by
+            a given data file; this is a string unless the file covers all
+            districts, which case it is None. Each value is a string filename
+            for the given data file within self._zip.
         """
         lowercase_name = self.name.lower()
+        file_name_pattern = re.compile(''.join([
+            r'^', lowercase_name, r'(?:_(?P<district>[A-Z]+))?\.txt$']))
 
         def file_is_for_table(file_name):
-            if file_name == lowercase_name + '.txt':
-                return True
-            return file_name.startswith(lowercase_name + '_')
-        data_file_names = tuple(
-            filter(file_is_for_table, self._zip.namelist()))
-
-        # If we have a file named exactly for this table, then ignore
-        # everything else; this is in order to distinguish between, for
-        # example, GS_CASE and GS_CASE_CAUSE_ACT.
-        if '{0}.txt'.format(lowercase_name) in data_file_names:
-            data_file_names = ('{0}.txt'.format(lowercase_name),)
-        self.logger.info('Found {0} file names for table {1}: {2}'.format(
-            len(data_file_names), self.name, ', '.join(data_file_names)))
+            match = file_name_pattern.match(file_name)
+            if not match:
+                return None
+            return (match.group('district'), file_name)
+        data_file_names = dict(
+            filter(None, map(file_is_for_table, self._zip.namelist())))
 
         return data_file_names
 

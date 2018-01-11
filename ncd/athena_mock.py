@@ -52,15 +52,23 @@ class AthenaMock(object):
         """
         return posixpath.join(str(self._base_dir), table_name)
 
-    def upload_data(self, table_name, file_obj):
+    def upload_data(self, table_name, file_obj, district=None):
         """Save the given data to disk.
 
         Args:
             table_name: A string table name.
             file_obj: A binary file-like object.
+            district: An optional string code for a federal judicial district;
+                provide this when DOJ splits up a table by district.
         """
-        output_path = self._table_dir / table_name / '{0}.json.gz'.format(
-            table_name)
+        if district:
+            table_dir = self._table_dir / table_name
+            district_dir = table_dir / 'filename_district={0}'.format(district)
+            output_path = district_dir / '{0}-{1}.json.gz'.format(
+                table_name, district)
+        else:
+            output_path = self._table_dir / table_name / '{0}.json.gz'.format(
+                table_name)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         file_obj.seek(0)
         with output_path.open('wb') as output_file:
