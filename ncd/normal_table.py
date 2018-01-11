@@ -26,9 +26,6 @@ logger.addHandler(ch)
 class NormalTable(object):
     """Helper to import raw fixed-width data to Athena.
 
-    FIXME: This doesn't yet take into account that a table may span multiple
-    zip files. Partitioning probably is the best way to handle this.
-
     Args:
         name: A string name for the NCD table being imported.
         zip_file: A zipfile.ZipFile of NCD data.
