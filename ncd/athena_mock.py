@@ -12,11 +12,15 @@ class AthenaMock(object):
         results_bucket: Ignored.
         s3_prefix: A string base directory into which table data and queries
             will be saved.
+        db_name: Ignored.
     """
-    def __init__(self, data_bucket=None, results_bucket=None, s3_prefix=None):
+    def __init__(
+            self, data_bucket=None, results_bucket=None, s3_prefix=None,
+            db_name=None):
         self.data_bucket = data_bucket
         self.results_bucket = results_bucket
         self.s3_prefix = s3_prefix
+        self.db_name = db_name
 
         self._base_dir = Path(s3_prefix)
 
@@ -29,6 +33,11 @@ class AthenaMock(object):
     # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
     # -=-=-=-=-=-=-=-=-=-=-= PUBLIC METHODS FOLLOW =-=-=-=-=-=-=-=-=-=-=-=-=-=-
     # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+
+    def create_db(self):
+        """No-op.
+        """
+        return
 
     def execute_query(self, sql_string):
         """Save the given query to disk.
