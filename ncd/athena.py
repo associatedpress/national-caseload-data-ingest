@@ -109,6 +109,8 @@ class Athena(object):
                 '{0}.json.gz'.format(table_name))
         file_obj.seek(0)
         self._s3.Bucket(self.data_bucket).upload_fileobj(file_obj, s3_key)
+        self.logger.debug('Uploaded file to s3://{0}/{1}'.format(
+            self.data_bucket, s3_key))
 
     # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
     # -=-=-=-=-=-=-=-=-=-=- INTERNAL METHODS FOLLOW -=-=-=-=-=-=-=-=-=-=-=-=-=-
