@@ -98,7 +98,17 @@ class Athena(object):
             district: An optional string code for a federal judicial district;
                 provide this when DOJ splits up a table by district.
         """
-        pass
+        if district:
+            s3_key = posixpath.join(
+                self.prefix_for_table(table_name),
+                'filename_district={0}'.format(district),
+                '{0}-{1}.json.gz'.format(table_name, district))
+        else:
+            s3_key = posixpath.join(
+                self.prefix_for_table(table_name),
+                '{0}.json.gz'.format(table_name))
+        file_obj.seek(0)
+        self._s3.Bucket(self.data_bucket).upload_fileobj(file_obj, s3_key)
 
     # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
     # -=-=-=-=-=-=-=-=-=-=- INTERNAL METHODS FOLLOW -=-=-=-=-=-=-=-=-=-=-=-=-=-
