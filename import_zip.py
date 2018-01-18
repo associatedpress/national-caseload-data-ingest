@@ -3,7 +3,7 @@ from argparse import ArgumentParser
 import logging
 import sys
 
-from ncd.athena_mock import AthenaMock as Athena
+from ncd.athena import Athena
 from ncd.data_zip import DataZip
 
 
