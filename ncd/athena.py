@@ -48,9 +48,11 @@ class Athena(object):
     def create_db(self):
         """Create the database we want to use.
         """
+        self.logger.debug('Ensuring Athena database exists')
         self.execute_query(
             'CREATE DATABASE IF NOT EXISTS {0};'.format(self.db_name),
             'default')
+        self.logger.debug('CREATE DATABASE query completed')
 
     def execute_query(self, sql_string, db_name=None):
         """Execute a query on Athena.
