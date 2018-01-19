@@ -256,7 +256,7 @@ class NormalTable(object):
         """
         self._schema.seek(0)
         fixed_width_data.seek(0)
-        fixed_width_text = TextIOWrapper(fixed_width_data, encoding='utf-8')
+        fixed_width_text = TextIOWrapper(fixed_width_data, encoding='latin-1')
 
         csv_file = TemporaryFile(mode='w+')
         fixed2csv(fixed_width_text, self._schema, output=csv_file)

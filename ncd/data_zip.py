@@ -102,7 +102,7 @@ class DataZip(object):
             format expected by csvkit's in2csv utility.
         """
         with self._zip_file.open('README.TXT', 'r') as readme_file:
-            readme = readme_file.read().decode('utf-8')
+            readme = readme_file.read().decode('latin-1')
 
         schemas = {}
 
@@ -144,7 +144,7 @@ class DataZip(object):
             self._zip_file.namelist())))
         for file_name in table_file_names:
             with self._zip_file.open(file_name, 'r') as input_file:
-                raw_content = input_file.read().decode('utf-8')
+                raw_content = input_file.read().decode('latin-1')
             LookupTable(raw_content, self._athena).load()
 
     def _process_normal_tables(self, schemas):
