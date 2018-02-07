@@ -8,7 +8,7 @@ from tempfile import NamedTemporaryFile
 import aiohttp
 from lxml import etree
 
-from ncd.athena_mock import AthenaMock as Athena  # FIXME: Replace this.
+from ncd.athena import Athena as Athena
 from ncd.data_zip import DataZip
 
 
