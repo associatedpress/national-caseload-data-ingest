@@ -25,12 +25,12 @@ class DataZip(object):
 
     Args:
         zip_path: A string path to a zip file from NCD.
-        athena: An ncd.Athena to use when accessing AWS.
+        engine: A sqlalchemy.engine.Engine.
     """
 
-    def __init__(self, zip_path=None, athena=None):
+    def __init__(self, zip_path=None, engine=None):
         self._zip_path = zip_path
-        self._athena = athena
+        self._engine = engine
         self.logger = logger.getChild('DataZip')
 
     # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
@@ -38,7 +38,7 @@ class DataZip(object):
     # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
 
     def load(self):
-        """Load this file's tables into Athena."""
+        """Load this file's tables into the database."""
         with ZipFile(self._zip_path, 'r') as zip_file:
             logger.info('Opened input file {0}'.format(self._zip_path))
             self._zip_file = zip_file
@@ -135,7 +135,7 @@ class DataZip(object):
 
     def _process_global_tables(self):
         """Load this file's global (schemaless) tables into Athena."""
-        GlobalFile(self._zip_file, self._athena).load()
+        GlobalFile(self._zip_file, self._engine).load()
 
     def _process_lookup_tables(self):
         """Load this file's separate lookup tables into Athena."""
@@ -145,7 +145,7 @@ class DataZip(object):
         for file_name in table_file_names:
             with self._zip_file.open(file_name, 'r') as input_file:
                 raw_content = input_file.read().decode('latin-1')
-            LookupTable(raw_content, self._athena).load()
+            LookupTable(raw_content, self._engine).load()
 
     def _process_normal_tables(self, schemas):
         """Load this file's normal tables into Athena.
@@ -159,5 +159,5 @@ class DataZip(object):
         for table_name in table_names:
             normal_table = NormalTable(
                 name=table_name, zip_file=self._zip_file,
-                schema_io=schemas[table_name], athena=self._athena)
+                schema_io=schemas[table_name], engine=self._engine)
             normal_table.load()

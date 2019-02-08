@@ -3,7 +3,8 @@ from argparse import ArgumentParser
 import logging
 import sys
 
-from ncd.athena import Athena
+from sqlalchemy import create_engine
+
 from ncd.data_zip import DataZip
 
 
@@ -19,22 +20,14 @@ logger.addHandler(ch)
 
 parser = ArgumentParser(description='Load a file of National Caseload Data.')
 parser.add_argument(
-    '--data-bucket', help='S3 bucket name for data files', required=True)
-parser.add_argument(
-    '--results-bucket', help='S3 bucket name for query results', required=True)
-parser.add_argument(
-    '--s3-prefix', help='Prefix for data file paths on S3', required=True)
-parser.add_argument('--db-name', help='Database name on Athena', required=True)
+    '--database-url', help='SQLAlchemy database URL', required=True)
 parser.add_argument('zip_path', help='Path to a zip file from NCD')
 
 
 def main(raw_args):
     args = parser.parse_args(raw_args)
-    athena = Athena(
-        data_bucket=args.data_bucket, results_bucket=args.results_bucket,
-        s3_prefix=args.s3_prefix, db_name=args.db_name)
-    athena.create_db()
-    DataZip(args.zip_path, athena).load()
+    engine = create_engine(args.database_url)
+    DataZip(args.zip_path, engine).load()
 
 
 if __name__ == '__main__':

@@ -1,16 +1,15 @@
 from csv import DictReader
 import datetime
-import gzip
 from io import TextIOWrapper
 from itertools import chain
-import json
 import logging
 from operator import itemgetter
 import re
-from tempfile import NamedTemporaryFile, TemporaryFile
-from textwrap import dedent
+from tempfile import TemporaryFile
 
 from csvkit.convert.fixed import fixed2csv
+from sqlalchemy import (
+    BigInteger, Boolean, Column, Date, Float, MetaData, String, Table)
 
 
 logger = logging.getLogger(__name__)
@@ -31,14 +30,15 @@ class NormalTable(object):
         zip_file: A zipfile.ZipFile of NCD data.
         schema_io: A text file-like object with field information for the
             table's raw data.
-        athena: An ncd.Athena to use when accessing AWS.
+        engine: A sqlalchemy.engine.Engine.
     """
 
-    def __init__(self, name=None, zip_file=None, schema_io=None, athena=None):
+    def __init__(self, name=None, zip_file=None, schema_io=None, engine=None):
         self.name = name
         self._zip = zip_file
         self._schema = schema_io
-        self._athena = athena
+        self._engine = engine
+        self._metadata = MetaData()
         self.logger = logger.getChild('NormalTable')
 
     # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
@@ -49,26 +49,15 @@ class NormalTable(object):
         """Load this table's data into Athena."""
         data_file_names = self._get_file_names()
         districts = sorted(data_file_names.keys())
-        for district in districts:
-            district_file_name = data_file_names[district]
-            with NamedTemporaryFile('w+b') as raw_file:
-                with gzip.open(raw_file, 'wb') as gzip_file:
-                    text_gzip_file = TextIOWrapper(gzip_file, encoding='utf-8')
-                    self._convert_raw_file(district_file_name, text_gzip_file)
-                    text_gzip_file.close()
-                self._athena.upload_data(
-                    self.name, raw_file, district=district)
 
         is_partitioned = None not in districts
 
-        ddl = self._generate_ddl(is_partitioned)
-        self._athena.execute_query(ddl)
+        db_table = self._create_table(is_partitioned)
         self.logger.debug('Ensured table exists for {0}'.format(self.name))
 
-        if is_partitioned:
-            self._athena.execute_query(
-                'MSCK REPAIR TABLE {0};'.format(self.name))
-            self.logger.debug('Repaired table for {0}'.format(self.name))
+        for district in districts:
+            district_file_name = data_file_names[district]
+            self._insert_from_raw_file(district_file_name, db_table)
 
         self.logger.info('Loaded normal table {0}'.format(self.name))
 
@@ -76,22 +65,56 @@ class NormalTable(object):
     # -=-=-=-=-=-=-=-=-=-=- INTERNAL METHODS FOLLOW -=-=-=-=-=-=-=-=-=-=-=-=-=-
     # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
 
-    def _convert_raw_file(self, raw_path, gzip_file):
-        """Convert a raw data file for Athena and add it to a .gz.
+    def _create_table(self, is_partitioned=False):
+        """Create a database table, deleting an existing one if necessary.
 
         Args:
-            raw_path: A string path to a file stored in self._zip.
-            gzip_file: A file-like object to which our newly converted data
-                should be appended.
+            is_partitioned: A boolean specifying whether a table is to be split
+                into multiple files by federal judicial district (True) or
+                consists of only one file covering all districts (False).
+
+        Returns:
+            A sqlalchemy.table.Table.
         """
-        self.logger.debug('Beginning conversion of {0}'.format(raw_path))
+        self._schema.seek(0)
+        reader = DictReader(self._schema)
 
-        with self._zip.open(raw_path) as raw_data:
-            without_carriage_returns = self._remove_crs(raw_data)
-        csv_data = self._make_csv(without_carriage_returns)
-        self._generate_rows(csv_data, gzip_file)
+        def get_sqlalchemy_type(field_type_text):
+            field_components = re.match(
+                r'(?P<type>[^(]+)(?:\((?P<args>.+)\))?', field_type_text)
+            field_type_component = field_components.group('type')
+            if field_type_component in ('VARCHAR', 'VARCHAR2'):
+                return String
+            if field_type_component == 'NUMBER':
+                return BigInteger
+            if field_type_component == 'DATE':
+                return Date
+            if field_type_component == 'FLOAT':
+                return Float
+            raise NotImplementedError(
+                'Unsure how to handle a {0}'.format(field_type_text))
 
-        self.logger.debug('Completed conversion of {0}'.format(raw_path))
+        def build_column(row):
+            data_column = Column(
+                row['column'], get_sqlalchemy_type(row['field_type']))
+            redaction_column = Column(
+                'redacted_{0}'.format(row['column']), Boolean)
+            return (data_column, redaction_column)
+
+        column_pairs = tuple(map(build_column, reader))
+        data_columns = map(itemgetter(0), column_pairs)
+        redaction_columns = map(itemgetter(1), column_pairs)
+        columns = tuple(chain(data_columns, redaction_columns))
+
+        table = Table(self.name, self._metadata, *columns)
+
+        conn = self._engine.connect()
+        if not is_partitioned:
+            table.drop(conn, checkfirst=True)
+        table.create(conn, checkfirst=True)
+        conn.close()
+
+        return table
 
     def _gather_python_types(self):
         """Determine which Python data type each field should have.
@@ -134,79 +157,21 @@ class NormalTable(object):
 
         return dict(map(build_column, schema_reader))
 
-    def _generate_ddl(self, is_partitioned=False):
-        """Generate a CREATE EXTERNAL TABLE query to run on Athena.
-
-        Args:
-            is_partitioned: A boolean specifying whether a table is to be split
-                into multiple files by federal judicial district (True) or
-                consists of only one file covering all districts (False).
-
-        Returns:
-            A string SQL query to execute.
-        """
-        self._schema.seek(0)
-        reader = DictReader(self._schema)
-
-        def get_athena_type(field_type_text):
-            field_components = re.match(
-                r'(?P<type>[^(]+)(?:\((?P<args>.+)\))?', field_type_text)
-            field_type_component = field_components.group('type')
-            if field_type_component in ('VARCHAR', 'VARCHAR2'):
-                return 'STRING'
-            if field_type_component == 'NUMBER':
-                return 'BIGINT'
-            if field_type_component == 'DATE':
-                return 'DATE'  # Actually a date in strftime format '%d-%b-%Y'
-            if field_type_component == 'FLOAT':
-                return 'DOUBLE'
-            raise NotImplementedError(
-                'Unsure how to handle a {0}'.format(field_type_text))
-
-        def build_column(row):
-            data_column = '{0} {1}'.format(
-                row['column'], get_athena_type(row['field_type']))
-            redaction_column = 'redacted_{0} BOOLEAN'.format(row['column'])
-            return (data_column, redaction_column)
-
-        column_pairs = tuple(map(build_column, reader))
-        data_columns = map(itemgetter(0), column_pairs)
-        redaction_columns = map(itemgetter(1), column_pairs)
-        columns = tuple(chain(data_columns, redaction_columns))
-        column_specs = ',\n                '.join(columns)
-
-        if is_partitioned:
-            partition_clause = (
-                '\n            PARTITIONED BY (filename_district STRING)')
-        else:
-            partition_clause = ''
-
-        query = """
-            CREATE EXTERNAL TABLE IF NOT EXISTS {name} (
-                {columns}
-            ){partition_clause}
-            ROW FORMAT SERDE 'org.apache.hive.hcatalog.data.JsonSerDe'
-            STORED AS TEXTFILE
-            LOCATION 's3://{bucket}/{table_prefix}';
-        """.format(
-            name=self.name, columns=column_specs,
-            partition_clause=partition_clause,
-            bucket=self._athena.data_bucket,
-            table_prefix=self._athena.prefix_for_table(self.name)
-        )
-
-        return dedent(query)
-
-    def _generate_rows(self, csv_data, gzip_file):
-        """Convert rows of a CSV and append the results to a .gz.
+    def _generate_rows(self, csv_data, batch_size=100000):
+        """Convert rows of a CSV.
 
         Args:
             csv_data: A text file-like object containing CSV data.
-            gzip_file: A file-like object to which our newly converted data
-                should be appended.
+            batch_size: An int maximum number of rows to yield at once.
+
+        Yields:
+            A list of dicts.
         """
         field_converters = self._gather_python_types()
         reader = DictReader(csv_data)
+
+        batch_so_far = 0
+        output_objs = []
         for input_row in reader:
             output_obj = {}
             for field_name, field_raw_value in input_row.items():
@@ -218,8 +183,16 @@ class NormalTable(object):
                     redacted_value = False
                 output_obj[field_name] = field_value
                 output_obj['redacted_{0}'.format(field_name)] = redacted_value
-            output_json = json.dumps(output_obj)
-            gzip_file.write('{0}\n'.format(output_json))
+
+            output_objs.append(output_obj)
+            batch_so_far += 1
+
+            if batch_so_far >= batch_size:
+                yield output_objs
+                output_objs.clear()
+                batch_so_far = 0
+
+        yield output_objs
 
     def _get_file_names(self):
         """Determine which contents to use from our zip file.
@@ -243,6 +216,28 @@ class NormalTable(object):
             filter(None, map(file_is_for_table, self._zip.namelist())))
 
         return data_file_names
+
+    def _insert_from_raw_file(self, raw_path, db_table):
+        """Convert a raw data file for Athena and add it to a .gz.
+
+        Args:
+            raw_path: A string path to a file stored in self._zip.
+            db_table: A sqlalchemy.table.Table.
+        """
+        self.logger.debug('Beginning conversion of {0}'.format(raw_path))
+
+        with self._zip.open(raw_path) as raw_data:
+            without_carriage_returns = self._remove_crs(raw_data)
+        csv_data = self._make_csv(without_carriage_returns)
+
+        for rows_to_insert in self._generate_rows(csv_data):
+            conn = self._engine.connect()
+            conn.execute(db_table.insert(), rows_to_insert)
+            conn.close()
+            self.logger.debug('Inserted {0} rows of {1}'.format(
+                len(rows_to_insert), self.name))
+
+        self.logger.debug('Completed conversion of {0}'.format(raw_path))
 
     def _make_csv(self, fixed_width_data):
         """Convert a fixed-width data file to a CSV.

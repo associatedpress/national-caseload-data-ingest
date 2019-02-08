@@ -1,12 +1,10 @@
 from csv import DictReader, reader, writer
-import gzip
-from io import StringIO, TextIOWrapper
+from io import StringIO
 from itertools import starmap
-import json
 import logging
 import re
-from tempfile import NamedTemporaryFile
-from textwrap import dedent
+
+from sqlalchemy import Boolean, Column, MetaData, String, Table
 
 
 logger = logging.getLogger(__name__)
@@ -24,12 +22,13 @@ class GlobalFile(object):
 
     Args:
         zip_file: A zipfile.ZipFile of NCD data.
-        athena: An ncd.Athena to use when accessing AWS.
+        engine: A sqlalchemy.engine.Engine.
     """
 
-    def __init__(self, zip_file=None, athena=None):
+    def __init__(self, zip_file=None, engine=None):
         self._zip = zip_file
-        self._athena = athena
+        self._engine = engine
+        self._metadata = MetaData()
         self.logger = logger.getChild('GlobalFile')
 
     # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
@@ -52,26 +51,36 @@ class GlobalFile(object):
     # -=-=-=-=-=-=-=-=-=-=- INTERNAL METHODS FOLLOW -=-=-=-=-=-=-=-=-=-=-=-=-=-
     # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
 
-    def _convert_raw_file(self, table, output_file):
-        """Convert a raw data file for Athena and add it to a .gz.
+    def _create_table(self, name, table):
+        """Create a database table, deleting an existing one if necessary.
 
         Args:
+            name: A string name for the table being loaded.
             table: A text file-like object with table data.
-            output_file: A text file-like object to which our newly converted
-                data should be appended.
+
+        Returns:
+            A sqlalchemy.table.Table.
         """
         table.seek(0)
-        reader = DictReader(table)
+        table_reader = reader(table)
+        field_names = next(table_reader)
 
-        for input_row in reader:
-            output_row = {}
-            for key, value in input_row.items():
-                if key.startswith('redacted_'):
-                    output_row[key] = bool(value)
-                else:
-                    output_row[key] = value
-            output_file.write(json.dumps(output_row))
-            output_file.write('\n')
+        def build_column(field_name):
+            if field_name.startswith('redacted_'):
+                return Column(field_name, Boolean)
+            else:
+                return Column(field_name, String)
+
+        columns = tuple(map(build_column, field_names))
+
+        table = Table(name, self._metadata, *columns)
+
+        conn = self._engine.connect()
+        table.drop(conn, checkfirst=True)
+        table.create(conn, checkfirst=True)
+        conn.close()
+
+        return table
 
     def _extract_global_table(self, raw_fragment):
         """Extract a CSV of data for one table.
@@ -166,44 +175,6 @@ class GlobalFile(object):
 
         return tables
 
-    def _generate_ddl(self, name, table):
-        """Generate a CREATE EXTERNAL TABLE query to run on Athena.
-
-        Args:
-            name: A string name for the table being loaded.
-            table: A text file-like object with table data.
-
-        Returns:
-            A string SQL query to execute.
-        """
-        table.seek(0)
-        table_reader = reader(table)
-        field_names = next(table_reader)
-
-        def build_column(field_name):
-            if field_name.startswith('redacted_'):
-                return '{0} BOOLEAN'.format(field_name)
-            else:
-                return '{0} STRING'.format(field_name)
-
-        columns = tuple(map(build_column, field_names))
-        column_specs = ',\n                '.join(columns)
-
-        query = """
-            CREATE EXTERNAL TABLE IF NOT EXISTS {name} (
-                {columns}
-            )
-            ROW FORMAT SERDE 'org.apache.hive.hcatalog.data.JsonSerDe'
-            STORED AS TEXTFILE
-            LOCATION 's3://{bucket}/{table_prefix}';
-        """.format(
-            name=name, columns=column_specs,
-            bucket=self._athena.data_bucket,
-            table_prefix=self._athena.prefix_for_table(name)
-        )
-
-        return dedent(query)
-
     def _get_raw_content(self):
         """Load the global file into memory if available.
 
@@ -222,6 +193,30 @@ class GlobalFile(object):
         with self._zip.open(global_file_info, 'r') as input_file:
             return input_file.read().decode('utf-8')
 
+    def _insert_from_raw_file(self, table, db_table):
+        """Convert a raw data file for Athena and add it to a .gz.
+
+        Args:
+            table: A text file-like object with table data.
+            db_table: A sqlalchemy.schema.Table.
+        """
+        table.seek(0)
+        reader = DictReader(table)
+
+        output_rows = []
+        for input_row in reader:
+            output_row = {}
+            for key, value in input_row.items():
+                if key.startswith('redacted_'):
+                    output_row[key] = bool(value)
+                else:
+                    output_row[key] = value
+            output_rows.append(output_row)
+
+        conn = self._engine.connect()
+        conn.execute(db_table.insert(), output_rows)
+        conn.close()
+
     def _load_table(self, name, table):
         """Load a single table from the global file to Athena.
 
@@ -229,10 +224,5 @@ class GlobalFile(object):
             name: A string name for the table being loaded.
             table: A text file-like object with table data.
         """
-        with NamedTemporaryFile('w+b') as raw_file:
-            with gzip.open(raw_file, 'wb') as gzip_file:
-                text_gzip_file = TextIOWrapper(gzip_file, encoding='utf-8')
-                self._convert_raw_file(table, text_gzip_file)
-            self._athena.upload_data(name, raw_file)
-        ddl = self._generate_ddl(name, table)
-        self._athena.execute_query(ddl)
+        db_table = self._create_table(name, table)
+        self._insert_from_raw_file(table, db_table)

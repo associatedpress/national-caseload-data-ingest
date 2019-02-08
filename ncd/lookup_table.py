@@ -1,6 +1,8 @@
 import logging
 import re
 
+from sqlalchemy import MetaData
+
 from ncd.global_file import GlobalFile
 
 
@@ -19,12 +21,13 @@ class LookupTable(GlobalFile):
 
     Args:
         raw_content: A string with the content of a table's text file.
-        athena: An ncd.Athena to use when accessing AWS.
+        engine: A sqlalchemy.engine.Engine.
     """
 
-    def __init__(self, raw_content=None, athena=None):
+    def __init__(self, raw_content=None, engine=None):
         self._raw = raw_content
-        self._athena = athena
+        self._engine = engine
+        self._metadata = MetaData()
         self.logger = logger.getChild('LookupTable')
 
     # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-

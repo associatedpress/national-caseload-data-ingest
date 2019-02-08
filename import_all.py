@@ -7,8 +7,8 @@ from tempfile import NamedTemporaryFile
 
 import aiohttp
 from lxml import etree
+from sqlalchemy import create_engine
 
-from ncd.athena import Athena as Athena
 from ncd.data_zip import DataZip
 
 
@@ -24,12 +24,7 @@ logger.addHandler(ch)
 
 parser = ArgumentParser(description='Load a month of National Caseload Data.')
 parser.add_argument(
-    '--data-bucket', help='S3 bucket name for data files', required=True)
-parser.add_argument(
-    '--results-bucket', help='S3 bucket name for query results', required=True)
-parser.add_argument(
-    '--s3-prefix', help='Prefix for data file paths on S3', required=True)
-parser.add_argument('--db-name', help='Database name on Athena', required=True)
+    '--database-url', help='SQLAlchemy database URL', required=True)
 parser.add_argument(
     'file_listing_url',
     help='URL to a DOJ page of yearly or monthly data files')
@@ -52,12 +47,12 @@ async def get_file_urls(file_listing_url, session):
     return tuple(map(lambda link: link.attrib['href'], links))
 
 
-async def load_file_from_url(zip_file_url, athena, session):
-    """Download a data file and load it into Athena.
+async def load_file_from_url(zip_file_url, engine, session):
+    """Download a data file and load it into a database.
 
     Args:
         zip_file_url: A string URL to an NCD data file.
-        athena: An ncd.Athena to use when storing the file.
+        engine: A sqlalchemy.engine.Engine.
         session: An aiohttp.ClientSession to use.
     """
     zip_file_basename = zip_file_url.split('/')[-1]
@@ -76,18 +71,15 @@ async def load_file_from_url(zip_file_url, athena, session):
                 zip_file.write(chunk)
         zip_file.seek(0)
 
-        logger.debug('Saving {0} to Athena'.format(zip_file_basename))
-        DataZip(zip_file.name, athena).load()
+        logger.debug('Saving {0} to database'.format(zip_file_basename))
+        DataZip(zip_file.name, engine).load()
         logger.debug('Completed {0}'.format(zip_file_basename))
 
 
 async def main(raw_args):
     args = parser.parse_args(raw_args)
 
-    athena = Athena(
-        data_bucket=args.data_bucket, results_bucket=args.results_bucket,
-        s3_prefix=args.s3_prefix, db_name=args.db_name)
-    athena.create_db()
+    engine = create_engine(args.database_url)
 
     conn = aiohttp.TCPConnector(limit=1)
     async with aiohttp.ClientSession(connector=conn) as session:
@@ -95,7 +87,7 @@ async def main(raw_args):
         logger.info('Found {0} files to download'.format(len(file_urls)))
 
         async def load_url(file_url):
-            await load_file_from_url(file_url, athena, session)
+            await load_file_from_url(file_url, engine, session)
 
         await asyncio.gather(*map(load_url, file_urls))
 
