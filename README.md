@@ -85,4 +85,9 @@ There are two scripts in the root of this repo:
     invoke automatically and to allow one file to be processed while another
     downloads. Still working out some of the kinks there, though.)
 
+You'll need to install an appropriate [database adapter][] such as `psycopg2`
+depending on the database you intend to use; the `requirements.txt` file does
+not include any of these for you.
+
+[database adapter]: https://docs.sqlalchemy.org/en/rel_1_2/dialects/index.html
 [dump_fy_2017]: https://www.justice.gov/usao/resources/foia-library/national-caseload-data/2017
