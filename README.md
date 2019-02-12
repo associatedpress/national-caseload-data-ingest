@@ -2,10 +2,13 @@
 
 Ingest script to take the Department of Justice's
 [National Caseload Data][ncd], which covers cases handled by U.S. Attorneys,
-and load it into [Athena][] for querying.
+and load it with [SQLAlchemy][] into a database for querying.
 
-[Athena]: https://aws.amazon.com/athena/
+(Want to use [Amazon Athena][] instead? Look in the `master` branch.)
+
+[Amazon Athena]: https://aws.amazon.com/athena/
 [ncd]: https://www.justice.gov/usao/resources/foia-library/national-caseload-data
+[SQLAlchemy]: https://www.sqlalchemy.org/
 
 ## The files ##
 
@@ -73,9 +76,8 @@ release). Each zip file has one of three structures:
 
 There are two scripts in the root of this repo:
 
-*   `import_zip.py`, which takes one already-downloaded NCD component zip file,
-    converts it to [gzipped][athena-compression] [JSON][athena-json] for
-    Athena, uploads it to S3 and creates the appropriate Athena tables.
+*   `import_zip.py`, which takes one already-downloaded NCD component zip file
+    and imports it into a database.
 
 *   `import_all.py` is an experimental script that takes a URL to a dump's
     landing page ([such as this one][dump_fy_2017]) and asynchronously
@@ -83,6 +85,4 @@ There are two scripts in the root of this repo:
     invoke automatically and to allow one file to be processed while another
     downloads. Still working out some of the kinks there, though.)
 
-[athena-compression]: https://docs.aws.amazon.com/athena/latest/ug/compression-formats.html
-[athena-json]: https://docs.aws.amazon.com/athena/latest/ug/json.html
 [dump_fy_2017]: https://www.justice.gov/usao/resources/foia-library/national-caseload-data/2017
