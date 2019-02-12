@@ -4,6 +4,9 @@ Ingest script to take the Department of Justice's
 [National Caseload Data][ncd], which covers cases handled by U.S. Attorneys,
 and load it into [Athena][] for querying.
 
+(Want to use a more typical database, such as PostgreSQL? Look in the
+`sqlalchemy` branch.)
+
 [Athena]: https://aws.amazon.com/athena/
 [ncd]: https://www.justice.gov/usao/resources/foia-library/national-caseload-data
 
