@@ -127,7 +127,7 @@ class NormalTable(object):
 
         def _parse_oracle_date(raw_text):
             return datetime.datetime.strptime(raw_text, '%d-%b-%Y').strftime(
-                '%Y-%m-%d')
+                '%Y-%m-%d').rjust(10, '0')
 
         def converter_with_nulls(converter):
             def convert(raw_text):
