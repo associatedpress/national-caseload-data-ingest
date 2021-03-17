@@ -3,6 +3,7 @@ from argparse import ArgumentParser
 import logging
 import sys
 from tempfile import NamedTemporaryFile
+from urllib.parse import urlsplit, urlunsplit
 
 from lxml import etree
 import requests
@@ -29,6 +30,21 @@ parser.add_argument(
     help='URL to a DOJ page of yearly or monthly data files')
 
 
+def change_url_scheme(url, new_scheme):
+    """Change a URL from, say, HTTP to HTTPS.
+
+    Args:
+        url: A string URL to modify.
+        new_scheme: A string with which to replace the original URL's scheme
+            (everything before the :// portion).
+
+    Returns:
+        A string URL.
+    """
+    url_parts = urlsplit(url)
+    return urlunsplit((new_scheme, *url_parts[1:]))
+
+
 def get_file_urls(file_listing_url):
     """Determine which URLs need to be downloaded.
 
@@ -42,7 +58,9 @@ def get_file_urls(file_listing_url):
     raw_html = r.text
     html = etree.HTML(raw_html)
     links = html.cssselect('a[href$=".zip"]')
-    return tuple(map(lambda link: link.attrib['href'], links))
+    return tuple(map(
+        lambda link: change_url_scheme(link.attrib['href'], 'https'),
+        links))
 
 
 def load_file_from_url(zip_file_url, engine):
